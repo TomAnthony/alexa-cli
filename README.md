@@ -135,19 +135,19 @@ alexa speak "test" -d Kitchen --json
 
 ## Command Reference
 
-| Command | Description |
-|---------|-------------|
-| `alexa devices` | List all Echo devices |
-| `alexa speak <text> -d <device>` | Text-to-speech on device |
-| `alexa speak <text> --announce` | Announce to all devices |
-| `alexa command <text> -d <device>` | Send voice command |
-| `alexa routine list` | List routines |
-| `alexa routine run <name>` | Execute routine |
-| `alexa sh list` | List smart home devices |
-| `alexa sh on <device>` | Turn on device |
-| `alexa sh off <device>` | Turn off device |
-| `alexa sh brightness <device> <0-100>` | Set brightness |
-| `alexa auth` | Configure authentication |
+| Command | Description | Status |
+|---------|-------------|--------|
+| `alexa devices` | List all Echo devices | Working |
+| `alexa speak <text> -d <device>` | Text-to-speech on device | Working |
+| `alexa speak <text> --announce` | Announce to all devices | Working |
+| `alexa command <text> -d <device>` | Send voice command | Working |
+| `alexa auth` | Configure authentication | Working |
+| `alexa routine list` | List routines | WIP |
+| `alexa routine run <name>` | Execute routine | WIP |
+| `alexa sh list` | List smart home devices | WIP |
+| `alexa sh on/off <device>` | Control device | WIP |
+
+> **Note:** Routines and Smart Home commands are work-in-progress. For now, use `alexa command` to control smart home devices via natural language (e.g., `alexa command "turn off the lights" -d Kitchen`).
 
 ## Use Cases
 
