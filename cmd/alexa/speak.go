@@ -19,9 +19,9 @@ func newSpeakCmd(flags *rootFlags) *cobra.Command {
 Use --announce to broadcast to all devices.
 
 Examples:
-  alexa speak "Hello world" -d "Kitchen Echo"
-  alexa speak "Dinner is ready" --announce
-  alexa speak "The build completed successfully" -d Office`,
+  alexacli speak "Hello world" -d "Kitchen Echo"
+  alexacli speak "Dinner is ready" --announce
+  alexacli speak "The build completed successfully" -d Office`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getFormatter(flags)

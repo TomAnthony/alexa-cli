@@ -69,8 +69,8 @@ func newSmartHomeOnCmd(flags *rootFlags) *cobra.Command {
 		Long: `Turn on a smart home device.
 
 Examples:
-  alexa smarthome on "Kitchen Light"
-  alexa sh on "Living Room Lamp"`,
+  alexacli smarthome on "Kitchen Light"
+  alexacli sh on "Living Room Lamp"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getFormatter(flags)
@@ -102,8 +102,8 @@ func newSmartHomeOffCmd(flags *rootFlags) *cobra.Command {
 		Long: `Turn off a smart home device.
 
 Examples:
-  alexa smarthome off "Kitchen Light"
-  alexa sh off "All Lights"`,
+  alexacli smarthome off "Kitchen Light"
+  alexacli sh off "All Lights"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getFormatter(flags)
@@ -137,8 +137,8 @@ func newSmartHomeBrightnessCmd(flags *rootFlags) *cobra.Command {
 Level is 0-100.
 
 Examples:
-  alexa smarthome brightness "Kitchen Light" 50
-  alexa sh brightness "Bedroom Lamp" 75`,
+  alexacli smarthome brightness "Kitchen Light" 50
+  alexacli sh brightness "Bedroom Lamp" 75`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getFormatter(flags)

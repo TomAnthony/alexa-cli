@@ -62,8 +62,8 @@ func newRoutineRunCmd(flags *rootFlags) *cobra.Command {
 		Long: `Execute an Alexa routine by name.
 
 Examples:
-  alexa routine run "Good Night"
-  alexa routine run "Morning Routine" -d Kitchen`,
+  alexacli routine run "Good Night"
+  alexacli routine run "Morning Routine" -d Kitchen`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getFormatter(flags)

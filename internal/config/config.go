@@ -55,7 +55,7 @@ func Load() (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("not configured. Run 'alexa auth' first or set ALEXA_REFRESH_TOKEN")
+			return nil, fmt.Errorf("not configured. Run 'alexacli auth' first or set ALEXA_REFRESH_TOKEN")
 		}
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
@@ -66,7 +66,7 @@ func Load() (*Config, error) {
 	}
 
 	if cfg.RefreshToken == "" {
-		return nil, fmt.Errorf("refresh_token not set in config. Run 'alexa auth'")
+		return nil, fmt.Errorf("refresh_token not set in config. Run 'alexacli auth'")
 	}
 
 	// Default domain

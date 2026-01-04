@@ -26,7 +26,7 @@ func execute(args []string) error {
 Supports TTS announcements, smart home control, routine execution,
 and sending arbitrary voice commands.
 
-Get started by running 'alexa auth' to configure your refresh token.`,
+Get started by running 'alexacli auth' to configure your refresh token.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

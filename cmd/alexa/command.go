@@ -18,10 +18,10 @@ func newCommandCmd(flags *rootFlags) *cobra.Command {
 This is equivalent to saying "Alexa, <text>" to the device.
 
 Examples:
-  alexa command "turn off all lights" -d "Kitchen Echo"
-  alexa command "play jazz" -d Office
-  alexa command "what's the weather" -d Bedroom
-  alexa command "set a timer for 5 minutes" -d Kitchen`,
+  alexacli command "turn off all lights" -d "Kitchen Echo"
+  alexacli command "play jazz" -d Office
+  alexacli command "what's the weather" -d Bedroom
+  alexacli command "set a timer for 5 minutes" -d Kitchen`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getFormatter(flags)
