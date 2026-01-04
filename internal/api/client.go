@@ -7,17 +7,19 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
 
 // Client is the Alexa API client
 type Client struct {
-	httpClient   *http.Client
-	cookies      string
-	csrf         string
-	amazonDomain string // e.g., "amazon.com"
-	customerID   string
+	httpClient    *http.Client
+	cookies       string
+	csrf          string
+	activityCSRF  string // separate CSRF for activity/history endpoints
+	amazonDomain  string // e.g., "amazon.com"
+	customerID    string
 }
 
 // NewClient creates a new Alexa API client
@@ -489,6 +491,231 @@ func (c *Client) ControlSmartHome(entityID string, action string, value interfac
 
 	_, err := c.request("PUT", "/api/phoenix/state", payload)
 	return err
+}
+
+// fetchActivityCSRF retrieves the CSRF token needed for activity/history endpoints
+func (c *Client) fetchActivityCSRF() error {
+	activityURL := fmt.Sprintf("https://www.%s/alexa-privacy/apd/activity?ref=activityHistory", c.amazonDomain)
+
+	req, err := http.NewRequest("GET", activityURL, nil)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Cookie", c.cookies)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	bodyStr := string(body)
+
+	// Try multiple patterns for the CSRF token
+	// Pattern 1: meta tag
+	re := regexp.MustCompile(`<meta name="csrf-token" content="([^"]+)"`)
+	matches := re.FindStringSubmatch(bodyStr)
+	if len(matches) >= 2 {
+		c.activityCSRF = matches[1]
+		return nil
+	}
+
+	// Pattern 2: data attribute
+	re2 := regexp.MustCompile(`data-csrf="([^"]+)"`)
+	matches = re2.FindStringSubmatch(bodyStr)
+	if len(matches) >= 2 {
+		c.activityCSRF = matches[1]
+		return nil
+	}
+
+	// Pattern 3: JavaScript variable
+	re3 := regexp.MustCompile(`"csrfToken"\s*:\s*"([^"]+)"`)
+	matches = re3.FindStringSubmatch(bodyStr)
+	if len(matches) >= 2 {
+		c.activityCSRF = matches[1]
+		return nil
+	}
+
+	// Pattern 4: anti-csrf in any form
+	re4 := regexp.MustCompile(`anti-csrftoken-a2z['":\s]+['"]([^'"]+)['"]`)
+	matches = re4.FindStringSubmatch(bodyStr)
+	if len(matches) >= 2 {
+		c.activityCSRF = matches[1]
+		return nil
+	}
+
+	return fmt.Errorf("activity CSRF token not found in page")
+}
+
+// HistoryRecord represents a voice history record
+type HistoryRecord struct {
+	RecordKey       string    `json:"recordKey"`
+	Timestamp       int64     `json:"timestamp"`
+	Device          string    `json:"device"`
+	CustomerUtterance string  `json:"customerUtterance"` // What you said (ASR)
+	AlexaResponse   string    `json:"alexaResponse"`     // What Alexa said (TTS)
+}
+
+// GetCustomerHistoryRecords retrieves recent voice activity history
+func (c *Client) GetCustomerHistoryRecords(startTime, endTime int64) ([]HistoryRecord, error) {
+	// Ensure we have the activity CSRF token
+	if c.activityCSRF == "" {
+		if err := c.fetchActivityCSRF(); err != nil {
+			return nil, fmt.Errorf("failed to get activity CSRF: %w", err)
+		}
+	}
+
+	// Build URL with time range
+	historyURL := fmt.Sprintf(
+		"https://www.%s/alexa-privacy/apd/rvh/customer-history-records-v2/?startTime=%d&endTime=%d&pageType=VOICE_HISTORY",
+		c.amazonDomain, startTime, endTime,
+	)
+
+	body := bytes.NewReader([]byte(`{"previousRequestToken": null}`))
+	req, err := http.NewRequest("POST", historyURL, body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Cookie", c.cookies)
+	req.Header.Set("csrf", c.csrf)
+	req.Header.Set("anti-csrftoken-a2z", c.activityCSRF)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Origin", fmt.Sprintf("https://www.%s", c.amazonDomain))
+	req.Header.Set("Referer", fmt.Sprintf("https://www.%s/alexa-privacy/apd/activity?ref=activityHistory", c.amazonDomain))
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("history API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse the response
+	var result struct {
+		CustomerHistoryRecords []struct {
+			RecordKey              string `json:"recordKey"`
+			Timestamp              int64  `json:"timestamp"`
+			VoiceHistoryRecordItems []struct {
+				RecordItemType string `json:"recordItemType"`
+				TranscriptText string `json:"transcriptText"`
+			} `json:"voiceHistoryRecordItems"`
+		} `json:"customerHistoryRecords"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse history response: %w", err)
+	}
+
+	// Convert to our simplified format
+	var records []HistoryRecord
+	for _, r := range result.CustomerHistoryRecords {
+		record := HistoryRecord{
+			RecordKey: r.RecordKey,
+			Timestamp: r.Timestamp,
+		}
+
+		// Extract device from recordKey (format: customerId#timestamp#deviceType#serialNumber)
+		parts := strings.Split(r.RecordKey, "#")
+		if len(parts) >= 4 {
+			record.Device = parts[3]
+		}
+
+		// Collect ASR (what user said) and TTS (what Alexa said)
+		for _, item := range r.VoiceHistoryRecordItems {
+			switch item.RecordItemType {
+			case "ASR_REPLACEMENT_TEXT":
+				if record.CustomerUtterance != "" {
+					record.CustomerUtterance += " "
+				}
+				record.CustomerUtterance += item.TranscriptText
+			case "TTS_REPLACEMENT_TEXT":
+				if record.AlexaResponse != "" {
+					record.AlexaResponse += " "
+				}
+				record.AlexaResponse += item.TranscriptText
+			}
+		}
+
+		records = append(records, record)
+	}
+
+	return records, nil
+}
+
+// Ask sends a voice command and waits for Alexa's response
+func (c *Client) Ask(device *Device, question string, timeout time.Duration) (string, error) {
+	// Record the time before sending the command
+	startTime := time.Now().UnixMilli() - 1000 // 1 second buffer
+
+	// Send the command
+	if err := c.SequenceCommand(device, fmt.Sprintf("textcommand:'%s'", question)); err != nil {
+		return "", fmt.Errorf("failed to send command: %w", err)
+	}
+
+	// Poll for the response
+	endTime := time.Now().Add(timeout)
+	pollInterval := 500 * time.Millisecond
+
+	for time.Now().Before(endTime) {
+		time.Sleep(pollInterval)
+
+		// Get recent history
+		records, err := c.GetCustomerHistoryRecords(startTime, time.Now().UnixMilli()+60000)
+		if err != nil {
+			// Don't fail immediately, might be a transient error
+			continue
+		}
+
+		// Look for a record matching our device and time
+		for _, record := range records {
+			// Check if this is from our device (by serial number)
+			if !strings.Contains(record.RecordKey, device.SerialNumber) {
+				continue
+			}
+
+			// Check if this is recent enough
+			if record.Timestamp < startTime {
+				continue
+			}
+
+			// Check if the utterance matches our question (case-insensitive partial match)
+			if record.CustomerUtterance != "" &&
+			   strings.Contains(strings.ToLower(record.CustomerUtterance), strings.ToLower(question[:min(len(question), 20)])) {
+				if record.AlexaResponse != "" {
+					return record.AlexaResponse, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("timeout waiting for Alexa response")
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func mustJSON(v interface{}) string {
