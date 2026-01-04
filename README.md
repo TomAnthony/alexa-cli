@@ -2,7 +2,7 @@
 
 A command-line interface for controlling Amazon Alexa devices using the unofficial Alexa API.
 
-Control your Echo devices, send announcements, execute voice commands, and more - all from the terminal or scripts.
+**Control your smart home from the terminal.** Turn lights on/off, adjust thermostats, lock doors, play music, make announcements - anything you can say to Alexa, you can script.
 
 ## Installation
 
@@ -83,24 +83,35 @@ alexacli speak "Build complete" -d Kitchen
 alexacli speak "Build complete" -d "Living Room"
 ```
 
-### Voice Commands
+### Voice Commands (Smart Home Control)
 
-Send any command as if you spoke it to Alexa:
+Send any command as if you spoke it to Alexa. This is the primary way to control smart home devices:
 
 ```bash
-# Control smart home devices
+# Smart home control - lights, switches, plugs
 alexacli command "turn off the living room lights" -d Kitchen
+alexacli command "turn on the porch light" -d Kitchen
+alexacli command "dim the bedroom lights to 50 percent" -d Bedroom
+
+# Thermostats and climate
 alexacli command "set thermostat to 72 degrees" -d Bedroom
+alexacli command "what's the temperature inside" -d Kitchen
+
+# Locks and security
+alexacli command "lock the front door" -d Kitchen
 
 # Play music
 alexacli command "play jazz music" -d "Living Room"
+alexacli command "stop" -d "Living Room"
 
 # Ask questions
 alexacli command "what's the weather" -d Kitchen
 
-# Set timers and reminders
+# Timers and reminders
 alexacli command "set a timer for 10 minutes" -d Kitchen
 ```
+
+The `-d` flag specifies which Echo device processes the command. The device itself doesn't need to be near the smart home device - Alexa routes the command appropriately.
 
 ### Routines (Coming Soon)
 
@@ -112,17 +123,21 @@ alexacli routine list
 alexacli routine run "Good Night"
 ```
 
-### Smart Home (Coming Soon)
+### Direct Smart Home API (Coming Soon)
+
+For granular, programmatic control of smart home devices without natural language:
 
 ```bash
-# List smart home devices
+# List smart home devices with IDs and capabilities
 alexacli sh list
 
-# Control devices
+# Direct device control by name
 alexacli sh on "Kitchen Light"
 alexacli sh off "All Lights"
 alexacli sh brightness "Bedroom Lamp" 50
 ```
+
+> **Note:** For most use cases, especially AI agents, `alexacli command` is recommended. Natural language commands are more flexible and match how you'd interact with Alexa verbally. The direct API is useful when you need exact device IDs or want to avoid natural language parsing.
 
 ## JSON Output
 
@@ -140,25 +155,30 @@ alexacli speak "test" -d Kitchen --json
 | `alexacli devices` | List all Echo devices | Working |
 | `alexacli speak <text> -d <device>` | Text-to-speech on device | Working |
 | `alexacli speak <text> --announce` | Announce to all devices | Working |
-| `alexacli command <text> -d <device>` | Send voice command | Working |
+| `alexacli command <text> -d <device>` | Voice command (smart home, music, etc.) | Working |
 | `alexacli auth` | Configure authentication | Working |
 | `alexacli routine list` | List routines | WIP |
 | `alexacli routine run <name>` | Execute routine | WIP |
 | `alexacli sh list` | List smart home devices | WIP |
 | `alexacli sh on/off <device>` | Control device | WIP |
 
-> **Note:** Routines and Smart Home commands are work-in-progress. For now, use `alexacli command` to control smart home devices via natural language (e.g., `alexacli command "turn off the lights" -d Kitchen`).
+> **Note:** Routines and Direct Smart Home API are work-in-progress. Use `alexacli command` for smart home control - it's fully working and actually preferred for AI/agentic use since natural language is more flexible than device IDs.
 
 ## Use Cases
 
 ### Claude Code / AI Agent Integration
 
-This CLI was built specifically to allow AI assistants to control smart home devices:
+This CLI was built specifically to allow AI assistants to control smart home devices. The natural language `command` interface is ideal for agentic use - the AI can construct commands the same way a human would speak to Alexa:
 
 ```bash
-# In your AI assistant's prompt or tools
+# AI can control any smart home device using natural language
+alexacli command "turn off all the lights" -d Kitchen
+alexacli command "set the thermostat to 68" -d Kitchen
+alexacli command "lock the front door" -d Kitchen
+
+# Notifications and announcements
 alexacli speak "The build finished successfully" -d Office
-alexacli command "turn off all lights" -d Kitchen
+alexacli speak "Reminder: standup in 5 minutes" --announce
 ```
 
 ### Scripting and Automation
