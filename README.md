@@ -210,6 +210,17 @@ This approach is used by many popular projects including [alexa-remote-control](
 
 This is an unofficial tool that uses Amazon's private APIs. It may break at any time if Amazon changes their API. Use at your own risk.
 
+## Acknowledgments
+
+This project builds on the work of several excellent open source projects:
+
+- **[alexa-cookie-cli](https://github.com/adn77/alexa-cookie-cli)** by adn77 - Token authentication tool (required for setup)
+- **[alexa-cookie2](https://github.com/Apollon77/alexa-cookie2)** by Apollon77 - The underlying authentication library
+- **[alexa-remote-control](https://github.com/thorsten-gehrig/alexa-remote-control)** by thorsten-gehrig - Bash implementation that documented the API
+- **[alexa_media_player](https://github.com/alandtse/alexa_media_player)** by alandtse - Home Assistant integration that proved the approach at scale
+
+Without these projects' reverse-engineering efforts and documentation, this CLI wouldn't exist.
+
 ## License
 
 MIT
