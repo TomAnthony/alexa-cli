@@ -113,6 +113,40 @@ alexacli command "set a timer for 10 minutes" -d Kitchen
 
 The `-d` flag specifies which Echo device processes the command. The device itself doesn't need to be near the smart home device - Alexa routes the command appropriately.
 
+### Ask (Get Response Back)
+
+Send a command and capture Alexa's text response:
+
+```bash
+# Query and get the response
+alexacli ask "what's the thermostat set to" -d Kitchen
+# Output: The thermostat is set to 68 degrees.
+
+alexacli ask "what's on my calendar today" -d Kitchen
+# Output: You have 2 events today. First, standup at 9 AM...
+
+# JSON output for parsing
+alexacli ask "what time is it" -d Kitchen --json
+# {"data":{"device":"Kitchen","question":"what time is it","response":"The time is 3:22 PM."},"success":true}
+```
+
+This retrieves Alexa's actual response by polling the voice activity history. Useful for:
+- Querying smart home device state
+- Getting Alexa-specific information (calendar, reminders, timers)
+- Verifying that commands worked
+
+### History
+
+View recent voice activity:
+
+```bash
+alexacli history
+alexacli history --limit 5
+alexacli history --json
+```
+
+Shows what was said and what Alexa responded with.
+
 ### Routines (Coming Soon)
 
 ```bash
@@ -156,6 +190,8 @@ alexacli speak "test" -d Kitchen --json
 | `alexacli speak <text> -d <device>` | Text-to-speech on device | Working |
 | `alexacli speak <text> --announce` | Announce to all devices | Working |
 | `alexacli command <text> -d <device>` | Voice command (smart home, music, etc.) | Working |
+| `alexacli ask <text> -d <device>` | Send command, get response back | Working |
+| `alexacli history` | View recent voice activity | Working |
 | `alexacli auth` | Configure authentication | Working |
 | `alexacli routine list` | List routines | WIP |
 | `alexacli routine run <name>` | Execute routine | WIP |
