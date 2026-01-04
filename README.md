@@ -9,7 +9,7 @@ Control your Echo devices, send announcements, execute voice commands, and more 
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install buddyh/tap/alexa
+brew install buddyh/tap/alexacli
 ```
 
 ### Go
@@ -24,7 +24,7 @@ go install github.com/buddyh/alexa-cli/cmd/alexa@latest
 git clone https://github.com/buddyh/alexa-cli
 cd alexa-cli
 make build
-./bin/alexa --help
+./bin/alexacli --help
 ```
 
 ## Authentication
@@ -46,10 +46,10 @@ This opens a local proxy at http://127.0.0.1:8080. Log into your Amazon account 
 
 ```bash
 # Interactive
-alexa auth
+alexacli auth
 
 # Direct
-alexa auth <your-refresh-token>
+alexacli auth <your-refresh-token>
 
 # Or set environment variable
 export ALEXA_REFRESH_TOKEN=<your-token>
@@ -63,24 +63,24 @@ Configuration is stored in `~/.alexa-cli/config.json`.
 
 ```bash
 # List all Echo devices
-alexa devices
+alexacli devices
 
 # JSON output for scripting
-alexa devices --json
+alexacli devices --json
 ```
 
 ### Text-to-Speech
 
 ```bash
 # Speak on a specific device
-alexa speak "Hello world" -d "Kitchen Echo"
+alexacli speak "Hello world" -d "Kitchen Echo"
 
 # Announce to ALL devices
-alexa speak "Dinner is ready!" --announce
+alexacli speak "Dinner is ready!" --announce
 
 # Device name matching is flexible
-alexa speak "Build complete" -d Kitchen
-alexa speak "Build complete" -d "Living Room"
+alexacli speak "Build complete" -d Kitchen
+alexacli speak "Build complete" -d "Living Room"
 ```
 
 ### Voice Commands
@@ -89,39 +89,39 @@ Send any command as if you spoke it to Alexa:
 
 ```bash
 # Control smart home devices
-alexa command "turn off the living room lights" -d Kitchen
-alexa command "set thermostat to 72 degrees" -d Bedroom
+alexacli command "turn off the living room lights" -d Kitchen
+alexacli command "set thermostat to 72 degrees" -d Bedroom
 
 # Play music
-alexa command "play jazz music" -d "Living Room"
+alexacli command "play jazz music" -d "Living Room"
 
 # Ask questions
-alexa command "what's the weather" -d Kitchen
+alexacli command "what's the weather" -d Kitchen
 
 # Set timers and reminders
-alexa command "set a timer for 10 minutes" -d Kitchen
+alexacli command "set a timer for 10 minutes" -d Kitchen
 ```
 
 ### Routines (Coming Soon)
 
 ```bash
 # List available routines
-alexa routine list
+alexacli routine list
 
 # Execute a routine
-alexa routine run "Good Night"
+alexacli routine run "Good Night"
 ```
 
 ### Smart Home (Coming Soon)
 
 ```bash
 # List smart home devices
-alexa sh list
+alexacli sh list
 
 # Control devices
-alexa sh on "Kitchen Light"
-alexa sh off "All Lights"
-alexa sh brightness "Bedroom Lamp" 50
+alexacli sh on "Kitchen Light"
+alexacli sh off "All Lights"
+alexacli sh brightness "Bedroom Lamp" 50
 ```
 
 ## JSON Output
@@ -129,25 +129,25 @@ alexa sh brightness "Bedroom Lamp" 50
 All commands support `--json` for machine-readable output:
 
 ```bash
-alexa devices --json | jq '.[].name'
-alexa speak "test" -d Kitchen --json
+alexacli devices --json | jq '.[].name'
+alexacli speak "test" -d Kitchen --json
 ```
 
 ## Command Reference
 
 | Command | Description | Status |
 |---------|-------------|--------|
-| `alexa devices` | List all Echo devices | Working |
-| `alexa speak <text> -d <device>` | Text-to-speech on device | Working |
-| `alexa speak <text> --announce` | Announce to all devices | Working |
-| `alexa command <text> -d <device>` | Send voice command | Working |
-| `alexa auth` | Configure authentication | Working |
-| `alexa routine list` | List routines | WIP |
-| `alexa routine run <name>` | Execute routine | WIP |
-| `alexa sh list` | List smart home devices | WIP |
-| `alexa sh on/off <device>` | Control device | WIP |
+| `alexacli devices` | List all Echo devices | Working |
+| `alexacli speak <text> -d <device>` | Text-to-speech on device | Working |
+| `alexacli speak <text> --announce` | Announce to all devices | Working |
+| `alexacli command <text> -d <device>` | Send voice command | Working |
+| `alexacli auth` | Configure authentication | Working |
+| `alexacli routine list` | List routines | WIP |
+| `alexacli routine run <name>` | Execute routine | WIP |
+| `alexacli sh list` | List smart home devices | WIP |
+| `alexacli sh on/off <device>` | Control device | WIP |
 
-> **Note:** Routines and Smart Home commands are work-in-progress. For now, use `alexa command` to control smart home devices via natural language (e.g., `alexa command "turn off the lights" -d Kitchen`).
+> **Note:** Routines and Smart Home commands are work-in-progress. For now, use `alexacli command` to control smart home devices via natural language (e.g., `alexacli command "turn off the lights" -d Kitchen`).
 
 ## Use Cases
 
@@ -157,8 +157,8 @@ This CLI was built specifically to allow AI assistants to control smart home dev
 
 ```bash
 # In your AI assistant's prompt or tools
-alexa speak "The build finished successfully" -d Office
-alexa command "turn off all lights" -d Kitchen
+alexacli speak "The build finished successfully" -d Office
+alexacli command "turn off all lights" -d Kitchen
 ```
 
 ### Scripting and Automation
@@ -166,35 +166,35 @@ alexa command "turn off all lights" -d Kitchen
 ```bash
 #!/bin/bash
 # Announce when a long-running job finishes
-make build && alexa speak "Build complete!" --announce
+make build && alexacli speak "Build complete!" --announce
 ```
 
 ### Home Automation
 
 ```bash
 # Morning routine script
-alexa command "good morning" -d Bedroom
-alexa command "turn on kitchen lights" -d Kitchen
-alexa command "what's on my calendar today" -d Kitchen
+alexacli command "good morning" -d Bedroom
+alexacli command "turn on kitchen lights" -d Kitchen
+alexacli command "what's on my calendar today" -d Kitchen
 ```
 
 ## Token Refresh
 
-The refresh token is valid for approximately 14 days. If you get authentication errors, run `alexa auth` again with a fresh token from alexa-cookie-cli.
+The refresh token is valid for approximately 14 days. If you get authentication errors, run `alexacli auth` again with a fresh token from alexa-cookie-cli.
 
 ## Troubleshooting
 
 ### "not configured" error
 
-Run `alexa auth <token>` to configure your refresh token.
+Run `alexacli auth <token>` to configure your refresh token.
 
 ### Device not found
 
-Use `alexa devices` to see exact device names, then match them in your commands. Partial matching is supported.
+Use `alexacli devices` to see exact device names, then match them in your commands. Partial matching is supported.
 
 ### Command not working
 
-Try running the same command with `alexa command` instead - this sends it as a voice command which has broader support.
+Try running the same command with `alexacli command` instead - this sends it as a voice command which has broader support.
 
 ## How It Works
 

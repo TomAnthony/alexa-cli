@@ -19,7 +19,7 @@ func execute(args []string) error {
 	flags := &rootFlags{}
 
 	rootCmd := &cobra.Command{
-		Use:   "alexa",
+		Use:   "alexacli",
 		Short: "CLI for controlling Alexa devices",
 		Long: `A command-line interface for controlling Amazon Alexa devices.
 

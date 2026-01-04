@@ -1,6 +1,6 @@
 version: 2
 
-project_name: alexa
+project_name: alexacli
 
 before:
   hooks:
@@ -8,7 +8,7 @@ before:
 
 builds:
   - main: ./cmd/alexa
-    binary: alexa
+    binary: alexacli
     env:
       - CGO_ENABLED=0
     goos:
@@ -50,6 +50,6 @@ brews:
     description: "CLI for controlling Amazon Alexa devices"
     license: "MIT"
     install: |
-      bin.install "alexa"
+      bin.install "alexacli"
     test: |
-      system "#{bin}/alexa", "--help"
+      system "#{bin}/alexacli", "--help"
