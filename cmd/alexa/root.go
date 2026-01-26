@@ -39,7 +39,11 @@ Get started by running 'alexacli auth' to configure your refresh token.`,
 	rootCmd.AddCommand(newSpeakCmd(flags))
 	rootCmd.AddCommand(newCommandCmd(flags))
 	rootCmd.AddCommand(newAskCmd(flags))
+	rootCmd.AddCommand(newAskPlusCmd(flags))
+	rootCmd.AddCommand(newConversationsCmd(flags))
+	rootCmd.AddCommand(newFragmentsCmd(flags))
 	rootCmd.AddCommand(newHistoryCmd(flags))
+	rootCmd.AddCommand(newPlayCmd(flags))
 	rootCmd.AddCommand(newRoutineCmd(flags))
 	rootCmd.AddCommand(newSmartHomeCmd(flags))
 
