@@ -149,21 +149,66 @@ Shows what was said and what Alexa responded with.
 
 ### Alexa+ (LLM Conversations)
 
-Interact with Alexa+ (Amazon's LLM-powered assistant) via text:
+Interact with Alexa+ (Amazon's LLM-powered assistant) via text. Alexa+ is Amazon's newer LLM-powered backend that provides conversational AI responses.
+
+#### Quick Start (Recommended)
 
 ```bash
-# List all Alexa+ conversations
-alexacli conversations
+# Just specify the device - conversation ID is auto-selected
+alexacli askplus -d "Echo Show" "What's the capital of France?"
 
-# View conversation history
-alexacli fragments <conversation-id>
-
-# Send a message to Alexa+
-alexacli askplus -c <conversation-id> "What's the weather like today?"
+# Multi-turn conversations retain context
+alexacli askplus -d "Echo Show" "What about Germany?"
 ```
 
-Alexa+ provides:
-- Conversational AI responses with context memory
+The `-d` flag automatically finds the most recent conversation for that device.
+
+#### List Conversations
+
+```bash
+# See all Alexa+ conversations with devices and last activity
+alexacli conversations
+```
+
+Output:
+```
+Found 12 Alexa+ conversation(s):
+
+  Device: Echo Show
+  ID:     amzn1.conversation.b2925036-7d5b-461f-a989-04574eb6f2c9
+  Last:   2026-01-14 10:30:15
+
+  Device: Kitchen
+  ID:     amzn1.conversation.f7277f37-6a7b-4bee-b686-7f3be990f44d
+  Last:   2026-01-13 18:22:03
+  ...
+```
+
+#### Advanced: Use Specific Conversation ID
+
+```bash
+# If you need a specific conversation thread
+alexacli askplus -c "amzn1.conversation.xxx" "Hello"
+```
+
+#### View Conversation History
+
+```bash
+# See the full conversation thread
+alexacli fragments "amzn1.conversation.xxx"
+```
+
+Output shows both your messages (USER) and Alexa's responses (ALEXA):
+```
+[2026-01-14 10:30:15] USER
+  What's the capital of France?
+
+[2026-01-14 10:30:17] ALEXA
+  The capital of France is Paris...
+```
+
+**Alexa+ features:**
+- Conversational AI with persistent context
 - Multi-turn conversations
 - Complex reasoning and creative tasks
 - Source citations when applicable

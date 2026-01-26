@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -18,6 +20,9 @@ This command retrieves all active Alexa+ conversations from the AVS API.
 Each conversation ID is linked to a specific device and can be used with
 the 'askplus' command for continued conversations.
 
+TIP: Use 'alexacli askplus -d "Device Name"' to auto-select the most recent
+conversation for a device, instead of manually copying conversation IDs.
+
 Examples:
   # List all conversations
   alexacli conversations
@@ -25,7 +30,10 @@ Examples:
   # Output as JSON
   alexacli conversations --json
 
-  # Use a conversation ID with askplus
+  # Use askplus with device name (easier)
+  alexacli askplus -d "Echo Show" "Hello"
+
+  # Or use a specific conversation ID
   alexacli askplus -c "amzn1.conversation.xxx" "Hello"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getFormatter(flags)
@@ -59,7 +67,11 @@ Examples:
 			fmt.Printf("Found %d Alexa+ conversation(s):\n\n", len(conversations))
 			for _, conv := range conversations {
 				fmt.Printf("  Device: %s\n", conv.DeviceName)
-				fmt.Printf("  ID:     %s\n\n", conv.ConversationID)
+				fmt.Printf("  ID:     %s\n", conv.ConversationID)
+				if conv.LastTurnTime != "" {
+					fmt.Printf("  Last:   %s\n", formatTime(conv.LastTurnTime))
+				}
+				fmt.Println()
 			}
 
 			return nil
@@ -69,4 +81,24 @@ Examples:
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show debug output")
 
 	return cmd
+}
+
+// formatTime converts an ISO timestamp to a human-readable format
+func formatTime(isoTime string) string {
+	// Try parsing ISO 8601 format
+	t, err := time.Parse(time.RFC3339, isoTime)
+	if err != nil {
+		// Try without timezone
+		t, err = time.Parse("2006-01-02T15:04:05.000Z", isoTime)
+		if err != nil {
+			// Try with milliseconds
+			if strings.Contains(isoTime, ".") {
+				t, err = time.Parse("2006-01-02T15:04:05.000Z07:00", isoTime)
+			}
+			if err != nil {
+				return isoTime // Return as-is if parsing fails
+			}
+		}
+	}
+	return t.Local().Format("2006-01-02 15:04:05")
 }

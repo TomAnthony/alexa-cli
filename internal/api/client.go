@@ -1360,6 +1360,7 @@ func (c *Client) SynchronizeState() error {
 type Conversation struct {
 	ConversationID string `json:"conversationId"`
 	DeviceName     string `json:"deviceName"`
+	LastTurnTime   string `json:"lastTurnTime,omitempty"`
 }
 
 // GetConversations retrieves all Alexa+ conversations and their associated devices
@@ -1419,15 +1420,48 @@ func (c *Client) GetConversations() ([]Conversation, error) {
 		conv := Conversation{
 			ConversationID: item.ID,
 			DeviceName:     item.Creation.Origin.Name,
+			LastTurnTime:   item.LastTurn.Time,
 		}
 		// Prefer lastTurn device name if available (more recent)
 		if item.LastTurn.Origin.Name != "" {
 			conv.DeviceName = item.LastTurn.Origin.Name
 		}
+		// Fall back to creation time if no last turn
+		if conv.LastTurnTime == "" {
+			conv.LastTurnTime = item.Creation.Time
+		}
 		conversations = append(conversations, conv)
 	}
 
 	return conversations, nil
+}
+
+// GetConversationForDevice finds the most recent conversation ID for a device name
+// Returns empty string if no conversation found
+func (c *Client) GetConversationForDevice(deviceName string) (string, error) {
+	conversations, err := c.GetConversations()
+	if err != nil {
+		return "", err
+	}
+
+	deviceLower := strings.ToLower(deviceName)
+	var bestMatch *Conversation
+
+	for i := range conversations {
+		conv := &conversations[i]
+		if strings.Contains(strings.ToLower(conv.DeviceName), deviceLower) {
+			// First match or more recent than current best
+			if bestMatch == nil || conv.LastTurnTime > bestMatch.LastTurnTime {
+				bestMatch = conv
+			}
+		}
+	}
+
+	if bestMatch == nil {
+		return "", fmt.Errorf("no Alexa+ conversation found for device %q", deviceName)
+	}
+
+	return bestMatch.ConversationID, nil
 }
 
 // AskPlus sends a question via Alexa+ (LLM) and returns the response
