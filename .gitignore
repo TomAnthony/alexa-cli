@@ -30,3 +30,15 @@ dist/
 # Debug files
 debug_*.go
 test_*.go
+
+# Claude Code
+.claude/
+
+# Research and scripts (local development)
+research/
+scripts/
+
+# Local binaries (root level)
+/alexa
+/alexacli
+/poll-conversation
