@@ -147,6 +147,43 @@ alexacli history --json
 
 Shows what was said and what Alexa responded with.
 
+### Alexa+ (LLM Conversations)
+
+Interact with Alexa+ (Amazon's LLM-powered assistant) via text:
+
+```bash
+# List all Alexa+ conversations
+alexacli conversations
+
+# View conversation history
+alexacli fragments <conversation-id>
+
+# Send a message to Alexa+
+alexacli askplus -c <conversation-id> "What's the weather like today?"
+```
+
+Alexa+ provides:
+- Conversational AI responses with context memory
+- Multi-turn conversations
+- Complex reasoning and creative tasks
+- Source citations when applicable
+
+> **Note:** Requires Alexa+ to be enabled on your Amazon account.
+
+### Audio Playback
+
+Play MP3 audio through Alexa devices using SSML:
+
+```bash
+# Play audio from HTTPS URL
+alexacli play --url "https://example.com/audio.mp3" -d "Echo Show"
+```
+
+Requirements:
+- MP3 format: 48kbps bitrate, 22050Hz sample rate
+- HTTPS URL with valid SSL certificate
+- Convert audio: `ffmpeg -i input.mp3 -ar 22050 -ab 48k -ac 1 output.mp3`
+
 ### Routines (Coming Soon)
 
 ```bash
@@ -192,6 +229,10 @@ alexacli speak "test" -d Kitchen --json
 | `alexacli command <text> -d <device>` | Voice command (smart home, music, etc.) | Working |
 | `alexacli ask <text> -d <device>` | Send command, get response back | Working |
 | `alexacli history` | View recent voice activity | Working |
+| `alexacli conversations` | List Alexa+ conversation IDs | Working |
+| `alexacli fragments <id>` | View Alexa+ conversation history | Working |
+| `alexacli askplus -c <id> <text>` | Send message to Alexa+ LLM | Working |
+| `alexacli play --url <url> -d <device>` | Play MP3 audio via SSML | Working |
 | `alexacli auth` | Configure authentication | Working |
 | `alexacli routine list` | List routines | WIP |
 | `alexacli routine run <name>` | Execute routine | WIP |
