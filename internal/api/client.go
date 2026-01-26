@@ -14,12 +14,27 @@ import (
 
 // Client is the Alexa API client
 type Client struct {
-	httpClient    *http.Client
-	cookies       string
-	csrf          string
-	activityCSRF  string // separate CSRF for activity/history endpoints
-	amazonDomain  string // e.g., "amazon.com"
-	customerID    string
+	httpClient     *http.Client
+	cookies        string
+	csrf           string
+	activityCSRF   string // separate CSRF for activity/history endpoints
+	amazonDomain   string // e.g., "amazon.com"
+	customerID     string
+	bearerToken    string // Atna| token for AVS APIs
+	conversationID string // Current conversation ID for Alexa+
+	refreshToken   string // Store for re-auth
+	verbose        bool   // Enable debug logging
+}
+
+// SetVerbose enables or disables verbose debug output
+func (c *Client) SetVerbose(v bool) {
+	c.verbose = v
+}
+
+func (c *Client) log(format string, args ...interface{}) {
+	if c.verbose {
+		fmt.Printf("[DEBUG] "+format+"\n", args...)
+	}
 }
 
 // NewClient creates a new Alexa API client
@@ -29,6 +44,7 @@ func NewClient(refreshToken, amazonDomain string) (*Client, error) {
 			Timeout: 30 * time.Second,
 		},
 		amazonDomain: amazonDomain,
+		refreshToken: refreshToken,
 	}
 
 	// Exchange refresh token for cookies
@@ -721,4 +737,792 @@ func min(a, b int) int {
 func mustJSON(v interface{}) string {
 	data, _ := json.Marshal(v)
 	return string(data)
+}
+
+// ============================================================================
+// Alexa+ (LLM) Support
+// ============================================================================
+
+// avsURL returns the AVS API base URL
+func (c *Client) avsURL() string {
+	return "https://avs-alexa-12-na.amazon.com"
+}
+
+// getBearerToken obtains an access token for AVS APIs
+func (c *Client) getBearerToken() error {
+	if c.bearerToken != "" {
+		c.log("Using cached bearer token")
+		return nil // Already have one
+	}
+
+	c.log("Requesting new bearer token from api.amazon.com/auth/token")
+
+	authURL := "https://api.amazon.com/auth/token"
+
+	data := url.Values{}
+	data.Set("requested_token_type", "access_token")
+	data.Set("source_token_type", "refresh_token")
+	data.Set("source_token", c.refreshToken)
+	data.Set("app_name", "Amazon Alexa")
+	data.Set("app_version", "2.2.696573.0")
+
+	req, err := http.NewRequest("POST", authURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("x-amzn-identity-auth-domain", "api.amazon.com")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("bearer token request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	c.log("Bearer token response status: %d", resp.StatusCode)
+
+	if resp.StatusCode != http.StatusOK {
+		c.log("Bearer token error body: %s", string(body))
+		return fmt.Errorf("bearer token failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		AccessToken string `json:"access_token"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("failed to parse bearer token response: %w", err)
+	}
+
+	c.bearerToken = result.AccessToken
+	c.log("Got bearer token: %s...", c.bearerToken[:min(20, len(c.bearerToken))])
+	return nil
+}
+
+// generateUUID generates a simple UUID-like string
+func generateUUID() string {
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		time.Now().UnixNano()&0xFFFFFFFF,
+		time.Now().UnixNano()>>32&0xFFFF,
+		0x4000|time.Now().UnixNano()>>48&0x0FFF,
+		0x8000|time.Now().UnixNano()>>60&0x3FFF,
+		time.Now().UnixNano())
+}
+
+// CardData represents the card data inside APLFragment datasources
+type CardData struct {
+	Type     string `json:"type"`
+	CardType string `json:"cardType"`
+	Text     string `json:"text"`
+	Items    []struct {
+		Text  string `json:"text"`
+		Style string `json:"style"`
+	} `json:"items"`
+}
+
+// FragmentContent represents the content of a conversation fragment
+type FragmentContent struct {
+	Type     string `json:"type"`
+	CardType string `json:"cardType"`
+	Text     string `json:"text"`
+	Items    []struct {
+		Text  string `json:"text"`
+		Style string `json:"style"`
+	} `json:"items"`
+	// For APLFragment type, text is nested in datasources.cardData
+	Datasources struct {
+		CardData *CardData `json:"cardData"`
+	} `json:"datasources"`
+}
+
+// GetText returns the text content, handling both Card and APLFragment types
+func (fc *FragmentContent) GetText() string {
+	if fc.Text != "" {
+		return fc.Text
+	}
+	if fc.Datasources.CardData != nil && fc.Datasources.CardData.Text != "" {
+		return fc.Datasources.CardData.Text
+	}
+	return ""
+}
+
+// ConversationFragment represents an Alexa+ conversation response
+type ConversationFragment struct {
+	FragmentURI string           `json:"fragmentURI"`
+	Timestamp   string           `json:"timestamp"`
+	Content     *FragmentContent `json:"content"`
+	RawContent  json.RawMessage  `json:"-"` // For debugging
+	Metadata    struct {
+		Purpose    string `json:"purpose"`
+		Provenance struct {
+			Type string `json:"type"`
+		} `json:"provenance"`
+	} `json:"metadata"`
+}
+
+// ConversationResponse represents the full conversation API response
+type ConversationResponse struct {
+	ConversationID string                 `json:"conversationId"`
+	Fragments      []ConversationFragment `json:"fragments"`
+	Token          string                 `json:"token"`
+}
+
+// SendAVSTextMessage sends a text message via AVS (Alexa+ Type-to-Alexa)
+func (c *Client) SendAVSTextMessage(text string) error {
+	_, _, err := c.SendAVSTextMessageWithResponse(text)
+	return err
+}
+
+// SendAVSTextMessageWithResponse sends text and returns conversation ID and any immediate response
+func (c *Client) SendAVSTextMessageWithResponse(text string) (conversationID string, responseText string, err error) {
+	c.log("SendAVSTextMessageWithResponse: %q", text)
+
+	if err := c.getBearerToken(); err != nil {
+		return "", "", fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	// Generate unique IDs - use Mobile_TTA_ prefix like the real app
+	dialogRequestID := fmt.Sprintf("Mobile_TTA_%s", strings.ToUpper(generateUUID()))
+	messageID := strings.ToUpper(generateUUID())
+	boundary := strings.ToUpper(generateUUID())
+
+	c.log("Dialog request ID: %s", dialogRequestID)
+	c.log("Conversation ID in context: %s", c.conversationID)
+
+	// Build context and add the text event
+	contexts := c.buildAVSContext()
+
+	// Build the multipart form data
+	event := map[string]interface{}{
+		"event": map[string]interface{}{
+			"header": map[string]interface{}{
+				"namespace":       "Alexa.Input.Text",
+				"name":            "TextMessage",
+				"messageId":       messageID,
+				"dialogRequestId": dialogRequestID,
+			},
+			"payload": map[string]interface{}{
+				"text": text,
+			},
+		},
+		"context": contexts,
+	}
+
+	eventJSON, _ := json.Marshal(event)
+
+	// Build multipart body
+	var body bytes.Buffer
+	body.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	body.WriteString("Content-Disposition: form-data; name=\"metadata\"\r\n")
+	body.WriteString("Content-Type: application/json; charset=UTF-8\r\n\r\n")
+	body.Write(eventJSON)
+	body.WriteString(fmt.Sprintf("\r\n--%s--", boundary))
+
+	c.log("Request body size: %d bytes (captured was 4187)", body.Len())
+
+	req, err2 := http.NewRequest("POST", c.avsURL()+"/v20160207/events", &body)
+	if err2 != nil {
+		return "", "", err2
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.bearerToken)
+	req.Header.Set("Content-Type", fmt.Sprintf("multipart/form-data; boundary=%s", boundary))
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("User-Agent", "Alexa/2.2.696573 CFNetwork/3860.200.71 Darwin/25.1.0")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	req.Header.Set("Priority", "u=1, i")
+	// Add cookies - the AVS endpoint may need session cookies in addition to bearer token
+	if c.cookies != "" {
+		req.Header.Set("Cookie", c.cookies)
+	}
+
+	resp, err2 := c.httpClient.Do(req)
+	if err2 != nil {
+		return "", "", fmt.Errorf("AVS request failed: %w", err2)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	c.log("AVS response status: %d", resp.StatusCode)
+	c.log("AVS response length: %d bytes", len(respBody))
+
+	// 204 No Content is success but no data
+	if resp.StatusCode == http.StatusNoContent {
+		c.log("Got 204 No Content - no response data")
+		return "", "", nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		c.log("AVS error response: %s", string(respBody))
+		return "", "", fmt.Errorf("AVS error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse multipart response for AddFragments directives
+	// Response format: multipart/related with JSON directives
+	respStr := string(respBody)
+
+	c.log("AVS response (first 500 chars): %s", respStr[:min(500, len(respStr))])
+
+	// Extract conversation ID from AddFragments directive
+	convIDRegex := regexp.MustCompile(`"conversationId"\s*:\s*"(amzn1\.conversation\.[^"]+)"`)
+	if matches := convIDRegex.FindStringSubmatch(respStr); len(matches) > 1 {
+		conversationID = matches[1]
+		c.log("Found conversation ID: %s", conversationID)
+	}
+
+	// Look for LLM response text in fragments
+	textRegex := regexp.MustCompile(`"text"\s*:\s*"([^"]+)"`)
+	if matches := textRegex.FindAllStringSubmatch(respStr, -1); len(matches) > 0 {
+		c.log("Found %d text matches in response", len(matches))
+		// Skip the first match which is usually the user's question
+		for i, match := range matches {
+			if i > 0 && len(match) > 1 && !strings.Contains(match[1], text) {
+				// This might be an LLM response
+				if strings.Contains(respStr, "LLM:APE") || strings.Contains(respStr, `"purpose":"AGENT"`) {
+					responseText = match[1]
+					c.log("Found potential LLM response: %s", responseText)
+					break
+				}
+			}
+		}
+	}
+
+	return conversationID, responseText, nil
+}
+
+// buildAVSContext returns the full context array needed for AVS requests
+func (c *Client) buildAVSContext() []map[string]interface{} {
+	contexts := []map[string]interface{}{
+		{
+			"header": map[string]interface{}{
+				"namespace": "SpeechSynthesizer",
+				"name":      "SpeechState",
+			},
+			"payload": map[string]interface{}{
+				"playerActivity":       "FINISHED",
+				"token":                "",
+				"offsetInMilliseconds": 0,
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "SpeechRecognizer",
+				"name":      "RecognizerState",
+			},
+			"payload": map[string]interface{}{
+				"wakeword": "ALEXA",
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Speaker",
+				"name":      "VolumeState",
+			},
+			"payload": map[string]interface{}{
+				"volume": 50,
+				"muted":  false,
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Alexa.Display.Window",
+				"name":      "WindowState",
+			},
+			"payload": map[string]interface{}{
+				"defaultWindowId": "app_window",
+				"instances": []map[string]interface{}{
+					{
+						"id":         "app_window",
+						"templateId": "app_window_template",
+						"configuration": map[string]interface{}{
+							"interactionMode":     "mobile_mode",
+							"sizeConfigurationId": "fullscreen",
+						},
+					},
+				},
+			},
+		},
+		{
+			// Critical: Tell Alexa this is a text-focused interaction
+			"header": map[string]interface{}{
+				"namespace": "VisualActivityTracker",
+				"name":      "ActivityState",
+			},
+			"payload": map[string]interface{}{
+				"focused": map[string]interface{}{
+					"interface": "Text",
+				},
+			},
+		},
+		{
+			// Indicate audio is idle
+			"header": map[string]interface{}{
+				"namespace": "AudioActivityTracker",
+				"name":      "ActivityState",
+			},
+			"payload": map[string]interface{}{
+				"dialog": map[string]interface{}{
+					"interface":            "SpeechSynthesizer",
+					"idleTimeInMilliseconds": 100000,
+				},
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Alerts",
+				"name":      "AlertsState",
+			},
+			"payload": map[string]interface{}{
+				"allAlerts":    []interface{}{},
+				"activeAlerts": []interface{}{},
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Alexa.IOComponents",
+				"name":      "TrustedStates",
+			},
+			"payload": map[string]interface{}{
+				"sessionStates": []interface{}{},
+				"unlockState":   "NEVER_UNLOCKED",
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Alexa.IOComponents",
+				"name":      "IOComponentStates",
+			},
+			"payload": map[string]interface{}{
+				"activeIOComponents": []interface{}{},
+				"allIOComponents":    []interface{}{},
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Alexa.PlaybackStateReporter",
+				"name":      "PlaybackState",
+			},
+			"payload": map[string]interface{}{
+				"state":               "IDLE",
+				"shuffle":             "NOT_SHUFFLED",
+				"repeat":              "NOT_REPEATED",
+				"favorite":            "NOT_RATED",
+				"positionMilliseconds": 0,
+				"supportedOperations": []string{"Play", "Pause", "Previous", "Next"},
+				"players":             []interface{}{},
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Alexa.IOComponents.Bluetooth",
+				"name":      "BluetoothState",
+			},
+			"payload": map[string]interface{}{
+				"bluetoothStates": []interface{}{},
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Alexa.Identity.Recognition",
+				"name":      "RecognitionState",
+			},
+			"payload": map[string]interface{}{
+				"RecognitionState": map[string]interface{}{
+					"primaryPerson": map[string]interface{}{
+						"acl": 100,
+						"id":  "amzn1.actor.person.did.AP4LASCN2HNWAAMTI32QX37S6QDPIFEQ2UGPIFWPF54F3Y7WDU4V4X273UV3BSP7ENUDDTIJ",
+					},
+				},
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "ExternalMediaPlayer",
+				"name":      "ExternalMediaPlayerState",
+			},
+			"payload": map[string]interface{}{
+				"agent":         "XOGFXO466L",
+				"spiVersion":    "2.2.0",
+				"players":       []interface{}{},
+				"playerInFocus": "",
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Alexa.Comms.PhoneCallController",
+				"name":      "PhoneCallControllerState",
+			},
+			"payload": map[string]interface{}{
+				"allCalls":    []interface{}{},
+				"currentCall": map[string]interface{}{},
+				"device": map[string]interface{}{
+					"connectionState": "DISCONNECTED",
+				},
+				"configuration": map[string]interface{}{
+					"callingFeature": []map[string]string{
+						{"OVERRIDE_RINGTONE_SUPPORTED": "false"},
+					},
+				},
+			},
+		},
+		{
+			"header": map[string]interface{}{
+				"namespace": "Alexa.Comms.MessagingController",
+				"name":      "MessagingControllerState",
+			},
+			"payload": map[string]interface{}{
+				"messagingEndpointStates": []map[string]interface{}{
+					{
+						"messagingEndpointInfo": map[string]string{"name": "DEFAULT"},
+						"permissions": map[string]string{
+							"sendPermission": "OFF",
+							"readPermission": "OFF",
+						},
+						"connectionState": "DISCONNECTED",
+					},
+				},
+			},
+		},
+	}
+
+	// Add conversation context
+	convPayload := map[string]interface{}{
+		"type":        "VCF2",
+		"version":     "2024.1",
+		"windowState": "NORMAL",
+		"size": map[string]interface{}{
+			"width":  430,
+			"height": 932,
+		},
+		"scrollable": map[string]interface{}{
+			"direction":    "vertical",
+			"allowForward": false,
+			"allowBackward": true,
+		},
+		"elements": []interface{}{},
+	}
+	if c.conversationID != "" {
+		convPayload["conversationId"] = c.conversationID
+	}
+	contexts = append(contexts, map[string]interface{}{
+		"header": map[string]interface{}{
+			"namespace": "Alexa.Conversation",
+			"name":      "ConversationState",
+		},
+		"payload": convPayload,
+	})
+
+	return contexts
+}
+
+// GetConversationFragments retrieves the latest conversation fragments
+func (c *Client) GetConversationFragments() (*ConversationResponse, error) {
+	if c.conversationID == "" {
+		return nil, fmt.Errorf("no conversation ID set")
+	}
+
+	if err := c.getBearerToken(); err != nil {
+		return nil, fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	// Build URL with token if available
+	fragURL := fmt.Sprintf("%s/v1/conversations/%s/fragments/synchronize",
+		c.avsURL(), c.conversationID)
+
+	req, err := http.NewRequest("GET", fragURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.bearerToken)
+	req.Header.Set("Cookie", c.cookies)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("conversation API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result ConversationResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse conversation response: %w", err)
+	}
+
+	// Debug: show fragment summary
+	if c.verbose {
+		agentCount := 0
+		for _, frag := range result.Fragments {
+			if frag.Metadata.Purpose == "AGENT" && frag.Content != nil {
+				text := frag.Content.GetText()
+				if text != "" {
+					agentCount++
+				}
+			}
+		}
+		c.log("Fragments: %d total, %d AGENT with text", len(result.Fragments), agentCount)
+	}
+
+	return &result, nil
+}
+
+// InitConversation creates or retrieves a conversation ID
+func (c *Client) InitConversation() error {
+	if c.conversationID != "" {
+		return nil
+	}
+
+	// Generate a new conversation ID in Amazon's format
+	c.conversationID = fmt.Sprintf("amzn1.conversation.%s", generateUUID())
+	return nil
+}
+
+// SetConversationID sets an existing conversation ID
+func (c *Client) SetConversationID(id string) {
+	c.conversationID = id
+}
+
+// SynchronizeState sends a state sync event to AVS (initializes session)
+func (c *Client) SynchronizeState() error {
+	if err := c.getBearerToken(); err != nil {
+		return fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	messageID := strings.ToUpper(generateUUID())
+	boundary := strings.ToUpper(generateUUID())
+
+	event := map[string]interface{}{
+		"event": map[string]interface{}{
+			"header": map[string]interface{}{
+				"namespace": "System",
+				"name":      "SynchronizeState",
+				"messageId": messageID,
+			},
+			"payload": map[string]interface{}{},
+		},
+		"context": c.buildAVSContext(),
+	}
+
+	eventJSON, _ := json.Marshal(event)
+
+	var body bytes.Buffer
+	body.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	body.WriteString("Content-Disposition: form-data; name=\"metadata\"\r\n")
+	body.WriteString("Content-Type: application/json; charset=UTF-8\r\n\r\n")
+	body.Write(eventJSON)
+	body.WriteString(fmt.Sprintf("\r\n--%s--", boundary))
+
+	c.log("SynchronizeState request size: %d bytes", body.Len())
+
+	req, err := http.NewRequest("POST", c.avsURL()+"/v20160207/events", &body)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.bearerToken)
+	req.Header.Set("Content-Type", fmt.Sprintf("multipart/form-data; boundary=%s", boundary))
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("User-Agent", "Alexa/2.2.696573 CFNetwork/3860.200.71 Darwin/25.1.0")
+	req.Header.Set("Priority", "u=3")
+	if c.cookies != "" {
+		req.Header.Set("Cookie", c.cookies)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("SynchronizeState request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	c.log("SynchronizeState response status: %d", resp.StatusCode)
+
+	// 204 No Content is expected for SynchronizeState
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("SynchronizeState error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// Conversation represents an Alexa+ conversation with a device
+type Conversation struct {
+	ConversationID string `json:"conversationId"`
+	DeviceName     string `json:"deviceName"`
+}
+
+// GetConversations retrieves all Alexa+ conversations and their associated devices
+func (c *Client) GetConversations() ([]Conversation, error) {
+	if err := c.getBearerToken(); err != nil {
+		return nil, fmt.Errorf("failed to get bearer token: %w", err)
+	}
+
+	req, err := http.NewRequest("GET", c.avsURL()+"/v1/conversations", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.bearerToken)
+	req.Header.Set("Accept", "application/json")
+	if c.cookies != "" {
+		req.Header.Set("Cookie", c.cookies)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("conversations API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Response structure: { "conversations": [ { "id": "...", "creation": { "origin": { "name": "..." } } }, ... ] }
+	var result struct {
+		Conversations []struct {
+			ID       string `json:"id"`
+			Creation struct {
+				Origin struct {
+					Name string `json:"name"`
+				} `json:"origin"`
+				Time string `json:"time"`
+			} `json:"creation"`
+			LastTurn struct {
+				Origin struct {
+					Name string `json:"name"`
+				} `json:"origin"`
+				Time string `json:"time"`
+			} `json:"lastTurn"`
+		} `json:"conversations"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse conversations response: %w", err)
+	}
+
+	var conversations []Conversation
+	for _, item := range result.Conversations {
+		conv := Conversation{
+			ConversationID: item.ID,
+			DeviceName:     item.Creation.Origin.Name,
+		}
+		// Prefer lastTurn device name if available (more recent)
+		if item.LastTurn.Origin.Name != "" {
+			conv.DeviceName = item.LastTurn.Origin.Name
+		}
+		conversations = append(conversations, conv)
+	}
+
+	return conversations, nil
+}
+
+// AskPlus sends a question via Alexa+ (LLM) and returns the response
+func (c *Client) AskPlus(question string, timeout time.Duration) (string, error) {
+	c.log("AskPlus: %q (timeout: %v)", question, timeout)
+
+	// First, sync state with AVS
+	c.log("Sending SynchronizeState...")
+	if err := c.SynchronizeState(); err != nil {
+		c.log("SynchronizeState error (continuing anyway): %v", err)
+	}
+
+	// Send the text message and get conversation ID from response
+	convID, initialText, err := c.SendAVSTextMessageWithResponse(question)
+	if err != nil {
+		return "", fmt.Errorf("failed to send message: %w", err)
+	}
+
+	// If we got a direct response, return it
+	if initialText != "" {
+		c.log("Got direct response from AVS POST")
+		return initialText, nil
+	}
+
+	// Set conversation ID for polling
+	if convID != "" {
+		c.conversationID = convID
+		c.log("Set conversation ID for polling: %s", convID)
+	}
+
+	// If no conversation ID, we can't poll
+	if c.conversationID == "" {
+		return "", fmt.Errorf("no conversation ID received from Alexa")
+	}
+
+	// Poll for new fragments
+	endTime := time.Now().Add(timeout)
+	pollInterval := 500 * time.Millisecond
+	pollCount := 0
+
+	c.log("Starting to poll conversation fragments...")
+
+	for time.Now().Before(endTime) {
+		time.Sleep(pollInterval)
+		pollCount++
+
+		resp, err := c.GetConversationFragments()
+		if err != nil {
+			c.log("Poll %d error: %v", pollCount, err)
+			continue // Keep trying
+		}
+
+		c.log("Poll %d: got %d fragments", pollCount, len(resp.Fragments))
+
+		// Look for AGENT responses with text content
+		for i, frag := range resp.Fragments {
+			hasContent := frag.Content != nil
+			text := ""
+			if hasContent {
+				text = frag.Content.GetText()
+			}
+			hasText := text != ""
+			if pollCount == 1 && i < 5 {
+				// Dump first 5 fragments on first poll for debugging
+				c.log("Frag[%d]: purpose=%s, uri=%s, hasContent=%v, hasText=%v",
+					i, frag.Metadata.Purpose, frag.FragmentURI, hasContent, hasText)
+			}
+			if hasText {
+				c.log("Fragment with text: purpose=%s, uri=%s, text=%q",
+					frag.Metadata.Purpose, frag.FragmentURI, text[:min(50, len(text))])
+
+				if frag.Metadata.Purpose == "AGENT" ||
+					strings.Contains(frag.FragmentURI, "LLM:APE") {
+					// Build response with source citations if present
+					result := text
+					// Check Items from either direct content or cardData
+					var items []struct {
+						Text  string `json:"text"`
+						Style string `json:"style"`
+					}
+					if len(frag.Content.Items) > 0 {
+						items = frag.Content.Items
+					} else if frag.Content.Datasources.CardData != nil {
+						items = frag.Content.Datasources.CardData.Items
+					}
+					for _, item := range items {
+						if item.Style == "text-style-attribution" {
+							result += "\n" + item.Text
+						}
+					}
+					return result, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("timeout waiting for Alexa+ response")
 }
